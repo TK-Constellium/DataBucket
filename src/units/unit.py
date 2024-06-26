@@ -1,9 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from DataBucket.src.auxiliary.value import NumberValue
-
 
 class CombinedUnit:
     def __init__(
@@ -121,10 +118,11 @@ class CombinedUnit:
             new_units = []
             adjust_factor = 1
             for unit in units:
-                if unit.__class__ == to_unit.__class__:
-                    adjust_factor = unit.FACTOR_DICT[to_unit] / unit.FACTOR_DICT[unit]
-                    new_units.append(to_unit)
-                else:
+                try:
+                    new_factor, new_unit = unit.convert(unit, to_unit)
+                    adjust_factor *= new_factor
+                    new_units.append(new_unit)
+                except TypeError:
                     new_units.append(unit)
             return new_units, adjust_factor
 
@@ -169,16 +167,13 @@ class Unit:
 
     @classmethod
     def convert(
-        cls, value: NumberValue | float, from_unit: Unit | None, to_unit: Unit
-    ) -> NumberValue | float:
+        cls, from_unit: Unit | None, to_unit: Unit
+    ) -> tuple[float, Unit]:
         if from_unit is None:
-            return value, to_unit
+            return 1, to_unit
         if from_unit.__class__ != to_unit.__class__:
             raise TypeError("Units must be of the same type")
-        new_value = (
-            value * from_unit.FACTOR_DICT[from_unit] / from_unit.FACTOR_DICT[to_unit]
-        )
-        return new_value, to_unit
+        return from_unit.FACTOR_DICT[from_unit] / from_unit.FACTOR_DICT[to_unit], to_unit
 
     def __truediv__(self, other: Unit | "CombinedUnit") -> "CombinedUnit":
         if isinstance(other, CombinedUnit):
