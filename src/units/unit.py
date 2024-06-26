@@ -14,21 +14,25 @@ class CombinedUnit:
         self.__total_factor = total_factor
 
         for unit in numerator:
-            self.__total_factor *= self.__getFactorAndUnit(self.__numerator, unit)
+            factor, unit = self.__getFactorAndUnit(self.__numerator, unit)
+            self.__total_factor *= factor
             self.__numerator.append(unit)
         for unit in denominator:
-            self.__total_factor /= self.__getFactorAndUnit(self.__denominator, unit)
+            factor, unit = self.__getFactorAndUnit(self.__denominator, unit)
+            self.__total_factor /= factor
             self.__denominator.append(unit)
 
     def __str__(self) -> str:
         def formatUnitList(unit_list: list[Unit]) -> str:
             unit_list = [str(unit) for unit in unit_list]
+            new_unit_list = []
             unit_set = set(unit_list)
             for unit in unit_set:
                 if unit_list.count(unit) > 1:
-                    unit_list.remove(unit)
-                    unit_list.append(f"{unit}^{unit_list.count(unit)}")
-            unit_text = " * ".join([str(unit) for unit in unit_list])
+                    new_unit_list.append(f"{unit}^{unit_list.count(unit)}")
+                else:
+                    new_unit_list.append(unit)
+            unit_text = " * ".join(new_unit_list)
             if unit_text == "":
                 unit_text = "1"
             return unit_text
@@ -66,7 +70,7 @@ class CombinedUnit:
     ) -> tuple[float, Unit]:
         for existing_unit in existing_units:
             if existing_unit.__class__ == new_unit.__class__:
-                return new_unit.convert(1, new_unit, existing_unit)
+                return new_unit.convert(new_unit, existing_unit)
         return 1, new_unit
 
     def __adjustUnits(
@@ -78,7 +82,9 @@ class CombinedUnit:
             "denominator": (self.__denominator.copy(), self.__numerator.copy()),
         }
         type1, type2 = type_dict[type]
-        factor, unit = self.__getFactorAndUnit(type1, unit)
+        factor1, unit = self.__getFactorAndUnit(type1, unit)
+        factor2, unit = self.__getFactorAndUnit(type2, unit)
+        factor = factor1 / factor2
         if unit in type2:
             type2.remove(unit)
             return factor, type1, type2
@@ -90,8 +96,8 @@ class CombinedUnit:
         return CombinedUnit(numerator, denominator, factor * self.total_factor)
 
     def addDenominator(self, unit: Unit) -> CombinedUnit:
-        factor, denominator, numerator = 1 / self.__adjustUnits(unit, "denominator")
-        return CombinedUnit(numerator, denominator, factor * self.total_factor)
+        factor, denominator, numerator = self.__adjustUnits(unit, "denominator")
+        return CombinedUnit(numerator, denominator, self.total_factor / factor)
 
     def __truediv__(self, other: Unit | CombinedUnit) -> CombinedUnit:
         if isinstance(other, Unit):
@@ -101,6 +107,7 @@ class CombinedUnit:
                 self = self.addDenominator(unit)
             for unit in other.denominator:
                 self = self.addNumerator(unit)
+
             return self
 
     def __mul__(self, other: Unit | CombinedUnit) -> CombinedUnit:
@@ -177,10 +184,10 @@ class Unit:
 
     def __truediv__(self, other: Unit | "CombinedUnit") -> "CombinedUnit":
         if isinstance(other, CombinedUnit):
-            return CombinedUnit(self) / other
-        return CombinedUnit(self).addDenominator(other)
+            return CombinedUnit([self]) / other
+        return CombinedUnit([self]).addDenominator(other)
 
     def __mul__(self, other: Unit | "CombinedUnit") -> "CombinedUnit":
         if isinstance(other, CombinedUnit):
-            return CombinedUnit(self) * other
-        return CombinedUnit(self).addNumerator(other)
+            return CombinedUnit([self]) * other
+        return CombinedUnit([self]).addNumerator(other)

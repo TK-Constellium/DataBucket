@@ -8,7 +8,7 @@ class WeightUnit(Unit):
         cls.MILLIGRAM = WeightUnit("Milligram", "mg")
         cls.GRAM = WeightUnit("Gram", "g")
         cls.KILOGRAM = WeightUnit("Kilogram", "kg")
-        cls.TONNE = WeightUnit("Tonne", "t")
+        cls.TON = WeightUnit("Ton", "t")
         cls.POUND = WeightUnit("Pound", "lb")
         cls.OUNCE = WeightUnit("Ounce", "oz")
 
@@ -16,7 +16,7 @@ class WeightUnit(Unit):
             cls.MILLIGRAM: 1e-6,
             cls.GRAM: 1e-3,
             cls.KILOGRAM: 1,
-            cls.TONNE: 1e3,
+            cls.TON: 1e3,
             cls.POUND: 0.45359237,
             cls.OUNCE: 0.028349523125,
         }
