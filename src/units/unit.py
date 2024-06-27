@@ -59,6 +59,10 @@ class CombinedUnit:
     def total_factor(self) -> float:
         return self.__total_factor
 
+    @property
+    def is_none(self) -> bool:
+        return not self.numerator and not self.denominator
+
     def resetTotalFactor(self) -> CombinedUnit:
         return self.__class__(self.numerator, self.denominator, 1)
 
@@ -118,6 +122,18 @@ class CombinedUnit:
                 self = self.__addDenominator(unit)
             return self
 
+    def __rtruediv__(self, other: Unit) -> CombinedUnit:
+        return CombinedUnit([other]) / self
+    
+    def __rmul__(self, other: Unit) -> CombinedUnit:
+        return self.__addNumerator(other)
+    
+    def __floordiv__(self, other: Unit | CombinedUnit) -> CombinedUnit:
+        return self.__truediv__(other)
+    
+    def __mod__(self, other: Unit | CombinedUnit) -> CombinedUnit:
+        return self.__truediv__(other)
+
     def convert(self, to_unit: Unit | CombinedUnit) -> CombinedUnit:
         def adjustUnits(units: list[Unit], to_unit: Unit) -> tuple[list[Unit], float]:
             new_units = []
@@ -176,6 +192,10 @@ class Unit:
     def symbol(self) -> str:
         return self.__symbol
 
+    @property
+    def is_none(self) -> bool:
+        return False
+    
     def convert(
         self, to_unit: Unit
     ) -> tuple[float, Unit]:

@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from datetime import date, datetime, timedelta
-from typing import Union
+from datetime import date, datetime, timedelta, timezone
+from DataBucket.src.units.unit import Unit, CombinedUnit
+from typing import Any, Callable
 
 
 class Value:
 
-    def __init__(self, value: any, connected_interface: any = None) -> None:
+    def __init__(self, value: Any, connected_interface: Any = None) -> None:
         self.__value = value
         self.__connected_interface = connected_interface
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> str:
         return f"{self.__class__.__name__}{hash(self.value)}"
 
     @property
-    def value(self) -> any:
+    def value(self) -> Any:
         return self.__value
 
     @property
-    def connected_interface(self) -> any:
+    def connected_interface(self) -> Any:
         return self.__connected_interface
 
 
@@ -28,8 +29,9 @@ class NumberValue(Value):
     def __init__(
         self,
         value: float | Decimal | int,
+        unit: Unit | CombinedUnit | None = None,
         decimal_places: int = 9,
-        connected_interface: any = None,
+        connected_interface: Any = None,
     ) -> None:
         try:
             value = Decimal(value).quantize(Decimal(f"1e-{decimal_places}"))
@@ -37,13 +39,42 @@ class NumberValue(Value):
             raise ValueError(f"Invalid value for NumberValue: {value}")
         super().__init__(value=value, connected_interface=connected_interface)
         self.__decimal_places = decimal_places
+        if (
+            unit is not None
+            and not isinstance(unit, Unit)
+            and not isinstance(unit, CombinedUnit)
+        ):
+            raise TypeError(
+                f"Invalid type for unit: {type(unit)}, must be Unit or CombinedUnit"
+            )
+        self.__unit = unit
 
     @property
     def decimal_places(self) -> int:
         return self.__decimal_places
 
+    @property
+    def unit(self) -> Unit | CombinedUnit | None:
+        return self.__unit
+
+    def convert(self, to_unit: Unit) -> NumberValue:
+        if self.unit is None:
+            raise ValueError("Cannot convert a unitless number")
+        if isinstance(self.unit, CombinedUnit):
+            combined_unit = self.unit.resetTotalFactor()
+            new_unit = combined_unit.convert(to_unit)
+            factor = new_unit.total_factor
+        else:
+            factor, new_unit = self.unit.convert(to_unit)
+        return NumberValue(
+            value=self.value * factor,
+            unit=new_unit,
+            decimal_places=self.decimal_places,
+            connected_interface=self.connected_interface,
+        )
+
     @classmethod
-    def __cast(cls, value: any, decimal_places: int = 9) -> "NumberValue":
+    def __cast(cls, value: Any, decimal_places: int = 9) -> NumberValue:
         if isinstance(value, NumberValue):
             return value
         if isinstance(value, Value):
@@ -51,93 +82,166 @@ class NumberValue(Value):
         return NumberValue(value=value, decimal_places=decimal_places)
 
     def __mathOperation(
-        self, other: "NumberValue" | int | float | str, operation: callable
-    ) -> "NumberValue":
+        self, other: NumberValue | int | float | str, operation: Callable
+    ) -> NumberValue:
         other = self.__cast(other, decimal_places=self.decimal_places)
         return NumberValue(
             value=operation(self.value, other.value),
             decimal_places=max(self.decimal_places, other.decimal_places),
             connected_interface=None,
+            unit=other.unit,
+        )
+
+    def __addAndSub(
+        self, other: NumberValue | int | float | str, operation: Callable
+    ) -> NumberValue:
+        other = self.__cast(other, decimal_places=self.decimal_places)
+        new_unit, factor = self.__syncUnitsAddAndSub(other)
+        new_value = operation(self.value * factor, other.value)
+        return NumberValue(
+            value=new_value,
+            decimal_places=max(self.decimal_places, other.decimal_places),
+            connected_interface=None,
+            unit=new_unit,
+        )
+
+    def __syncUnitsAddAndSub(
+        self, other: NumberValue
+    ) -> tuple[Unit | CombinedUnit | None, float]:
+        if self.unit is None or self.unit.is_none:
+            return other.unit, 1
+        if other.unit is None or other.unit.is_none:
+            return self.unit, 1
+        if isinstance(self.unit, CombinedUnit):
+            new_unit = self.unit.resetTotalFactor().convert(other.unit)
+            if new_unit != other.unit:
+                raise ValueError("Cannot add or subtract different units")
+            factor = new_unit.total_factor
+        elif isinstance(other.unit, CombinedUnit):
+            new_unit = other.unit.resetTotalFactor().convert(self.unit)
+            if new_unit != self.unit:
+                raise ValueError("Cannot add or subtract different units")
+            factor = new_unit.total_factor
+        else:
+            factor, new_unit = self.unit.convert(other.unit)
+        return new_unit, factor
+
+    def __syncUnitsMulAndDiv(
+        self, other: NumberValue, operation: Callable
+    ) -> tuple[Unit | CombinedUnit | None, float]:
+        if self.unit is None or self.unit.is_none:
+            return other.unit, 1
+        if other.unit is None or other.unit.is_none:
+            return self.unit, 1
+        new_unit: CombinedUnit = operation(self.unit, other.unit)
+        return new_unit, new_unit.total_factor
+
+    def __mulAndDiv(
+        self, other: NumberValue | int | float | str, operation: Callable
+    ) -> NumberValue:
+        other = self.__cast(other, decimal_places=self.decimal_places)
+        new_unit, factor = self.__syncUnitsMulAndDiv(other, operation)
+        new_value = operation(self.value, other.value) * factor
+        return NumberValue(
+            value=new_value,
+            decimal_places=max(self.decimal_places, other.decimal_places),
+            connected_interface=None,
+            unit=new_unit,
+        )
+
+    def __powOperation(
+        self, other: NumberValue | int | float | str, operation: Callable
+    ) -> NumberValue:
+        if isinstance(other, NumberValue):
+            if other.unit is not None and not other.unit.is_none:
+                raise ValueError("Cannot raise a number to a unit")
+
+        other = self.__cast(self, decimal_places=self.decimal_places)
+        return NumberValue(
+            value=operation(self.value, other.value),
+            decimal_places=max(self.decimal_places, other.decimal_places),
+            connected_interface=None,
+            unit=self.unit,
         )
 
     def __boolOperation(
-        self, other: "NumberValue" | int | float | str, operation: callable
+        self, other: NumberValue | int | float | str, operation: Callable
     ) -> bool:
         return operation(self.value, self.__cast(other).value)
 
-    def __add__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x + y)
+    def __add__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__addAndSub(other, lambda x, y: x + y)
 
-    def __sub__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x - y)
+    def __sub__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__addAndSub(other, lambda x, y: x - y)
 
-    def __mul__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x * y)
+    def __mul__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__mulAndDiv(other, lambda x, y: x * y)
 
-    def __truediv__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x / y)
+    def __truediv__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__mulAndDiv(other, lambda x, y: x / y)
 
-    def __floordiv__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x // y)
+    def __floordiv__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__mulAndDiv(other, lambda x, y: x // y)
 
-    def __mod__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x % y)
+    def __mod__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__mulAndDiv(other, lambda x, y: x % y)
 
-    def __pow__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
-        return self.__mathOperation(other, lambda x, y: x**y)
+    def __pow__(self, other: NumberValue | int | float | str) -> NumberValue:
+        return self.__powOperation(other, lambda x, y: x**y)
 
-    def __eq__(self, other: "NumberValue" | int | float | str) -> bool:
+    def __eq__(self, other: NumberValue | int | float | str) -> bool:
         return self.__boolOperation(other, lambda x, y: x == y)
 
-    def __ne__(self, other: "NumberValue" | int | float | str) -> bool:
+    def __ne__(self, other: NumberValue | int | float | str) -> bool:
         return self.__boolOperation(other, lambda x, y: x != y)
 
-    def __lt__(self, other: "NumberValue" | int | float | str) -> bool:
+    def __lt__(self, other: NumberValue | int | float | str) -> bool:
         return self.__boolOperation(other, lambda x, y: x < y)
 
-    def __le__(self, other: "NumberValue" | int | float | str) -> bool:
+    def __le__(self, other: NumberValue | int | float | str) -> bool:
         return self.__boolOperation(other, lambda x, y: x <= y)
 
-    def __gt__(self, other: "NumberValue" | int | float | str) -> bool:
+    def __gt__(self, other: NumberValue | int | float | str) -> bool:
         return self.__boolOperation(other, lambda x, y: x > y)
 
-    def __ge__(self, other: "NumberValue" | int | float | str) -> bool:
+    def __ge__(self, other: NumberValue | int | float | str) -> bool:
         return self.__boolOperation(other, lambda x, y: x >= y)
 
-    def __and__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
+    def __and__(self, other: NumberValue | int | float | str) -> NumberValue:
         return self.__mathOperation(other, lambda x, y: x & y)
 
-    def __or__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
+    def __or__(self, other: NumberValue | int | float | str) -> NumberValue:
         return self.__mathOperation(other, lambda x, y: x | y)
 
-    def __xor__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
+    def __xor__(self, other: NumberValue | int | float | str) -> NumberValue:
         return self.__mathOperation(other, lambda x, y: x ^ y)
 
-    def __lshift__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
+    def __lshift__(self, other: NumberValue | int | float | str) -> NumberValue:
         return self.__mathOperation(other, lambda x, y: x << y)
 
-    def __rshift__(self, other: "NumberValue" | int | float | str) -> "NumberValue":
+    def __rshift__(self, other: NumberValue | int | float | str) -> NumberValue:
         return self.__mathOperation(other, lambda x, y: x >> y)
 
-    def __neg__(self) -> "NumberValue":
+    def __neg__(self) -> NumberValue:
         return NumberValue(value=-self.value, decimal_places=self.decimal_places)
 
-    def __pos__(self) -> "NumberValue":
+    def __pos__(self) -> NumberValue:
         return NumberValue(value=+self.value, decimal_places=self.decimal_places)
 
-    def __abs__(self) -> "NumberValue":
+    def __abs__(self) -> NumberValue:
         return NumberValue(value=abs(self.value), decimal_places=self.decimal_places)
 
-    def __invert__(self) -> "NumberValue":
+    def __invert__(self) -> NumberValue:
         return NumberValue(value=~self.value, decimal_places=self.decimal_places)
 
-    def __round__(self, n: int = 0) -> "NumberValue":
+    def __round__(self, n: int = 0) -> NumberValue:
         return NumberValue(value=self.value, decimal_places=n)
 
-    def __floor__(self) -> "NumberValue":
+    def __floor__(self) -> NumberValue:
         return NumberValue(value=int(self.value), decimal_places=0)
 
-    def __ceil__(self) -> "NumberValue":
+    def __ceil__(self) -> NumberValue:
         return NumberValue(value=int(self.value) + 1, decimal_places=0)
 
     def __int__(self) -> int:
@@ -155,38 +259,38 @@ class NumberValue(Value):
 
 class StringValue(Value):
 
-    def __init__(self, value: any, connected_interface: any = None) -> None:
+    def __init__(self, value: Any, connected_interface: Any = None) -> None:
         super().__init__(value=str(value), connected_interface=connected_interface)
 
-    def __cast(self, value: any) -> "StringValue":
+    def __cast(self, value: Any) -> "StringValue":
         if isinstance(value, StringValue):
             return value
         if isinstance(value, Value):
             value = value.value
         return StringValue(value=value)
 
-    def __boolOperation(self, other: any, operation: callable) -> bool:
+    def __boolOperation(self, other: Any, operation: Callable) -> bool:
         return operation(self.value, self.__cast(other).value)
 
-    def __eq__(self, other: any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x == y)
 
-    def __ne__(self, other: any) -> bool:
+    def __ne__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x != y)
 
-    def __lt__(self, other: any) -> bool:
+    def __lt__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x < y)
 
-    def __le__(self, other: any) -> bool:
+    def __le__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x <= y)
 
-    def __gt__(self, other: any) -> bool:
+    def __gt__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x > y)
 
-    def __ge__(self, other: any) -> bool:
+    def __ge__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x >= y)
 
-    def __add__(self, other: any) -> "StringValue":
+    def __add__(self, other: Any) -> "StringValue":
         return StringValue(value=self.value + self.__cast(other).value)
 
     def __mul__(self, other: int) -> "StringValue":
@@ -213,32 +317,32 @@ class StringValue(Value):
 
 class BooleanValue(Value):
 
-    def __init__(self, value: any, connected_interface: any = None) -> None:
+    def __init__(self, value: Any, connected_interface: Any = None) -> None:
         super().__init__(value=bool(value), connected_interface=connected_interface)
 
-    def __cast(self, value: any) -> "BooleanValue":
+    def __cast(self, value: Any) -> "BooleanValue":
         if isinstance(value, BooleanValue):
             return value
         if isinstance(value, Value):
             value = value.value
         return BooleanValue(value=value)
 
-    def __boolOperation(self, other: any, operation: callable) -> bool:
+    def __boolOperation(self, other: Any, operation: Callable) -> bool:
         return operation(self.value, self.__cast(other).value)
 
-    def __eq__(self, other: any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x == y)
 
-    def __ne__(self, other: any) -> bool:
+    def __ne__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x != y)
 
-    def __and__(self, other: any) -> bool:
+    def __and__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x and y)
 
-    def __or__(self, other: any) -> bool:
+    def __or__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x or y)
 
-    def __xor__(self, other: any) -> bool:
+    def __xor__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x ^ y)
 
     def __str__(self) -> str:
@@ -265,52 +369,54 @@ class BooleanValue(Value):
 
 class DateValue(Value):
 
-    def __init__(self, value: any, connected_interface: any = None) -> None:
+    def __init__(
+        self, value: str | datetime | date, connected_interface: Any = None
+    ) -> None:
         if isinstance(value, str):
             value = datetime.fromisoformat(value).date()
-        try:
-            value = date(value)
-        except ValueError:
+        elif isinstance(value, datetime):
+            value = value.date()
+        elif not isinstance(value, date):
             raise ValueError(f"Invalid value for DateValue: {value}")
         super().__init__(value=value, connected_interface=connected_interface)
 
-    def __cast(self, value: any) -> "DateValue":
+    def __cast(self, value: Any) -> "DateValue":
         if isinstance(value, DateValue):
             return value
         if isinstance(value, Value):
             value = value.value
         return DateValue(value=value)
 
-    def __boolOperation(self, other: any, operation: callable) -> bool:
+    def __boolOperation(self, other: Any, operation: Callable) -> bool:
         return operation(self.value, self.__cast(other).value)
 
-    def __mathOperation(self, other: any, operation: callable) -> "DateValue":
+    def __mathOperation(self, other: Any, operation: Callable) -> "DateValue":
         if isinstance(other, timedelta):
             return DateValue(value=operation(self.value, other))
         return DateValue(value=operation(self.value, self.__cast(other).value))
 
-    def __eq__(self, other: any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x == y)
 
-    def __ne__(self, other: any) -> bool:
+    def __ne__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x != y)
 
-    def __lt__(self, other: any) -> bool:
+    def __lt__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x < y)
 
-    def __le__(self, other: any) -> bool:
+    def __le__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x <= y)
 
-    def __gt__(self, other: any) -> bool:
+    def __gt__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x > y)
 
-    def __ge__(self, other: any) -> bool:
+    def __ge__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x >= y)
 
-    def __add__(self, other: any) -> "DateValue":
+    def __add__(self, other: Any) -> DateValue:
         return self.__mathOperation(other, lambda x, y: x + y)
 
-    def __sub__(self, other: any) -> "DateValue" | timedelta:
+    def __sub__(self, other: Any) -> DateValue | timedelta:
         return self.__mathOperation(other, lambda x, y: x - y)
 
     def __str__(self) -> str:
@@ -331,52 +437,56 @@ class DateValue(Value):
 
 class DateTimeValue(Value):
 
-    def __init__(self, value: any, connected_interface: any = None) -> None:
+    def __init__(
+        self, value: str | datetime | date, connected_interface: Any = None
+    ) -> None:
         if isinstance(value, str):
             value = datetime.fromisoformat(value)
-        try:
-            value = datetime(value)
-        except ValueError:
+        elif isinstance(value, date):
+            value = datetime.combine(value, datetime.min.time())
+        elif not isinstance(value, datetime):
             raise ValueError(f"Invalid value for DateTimeValue: {value}")
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
         super().__init__(value=value, connected_interface=connected_interface)
 
-    def __cast(self, value: any) -> "DateTimeValue":
+    def __cast(self, value: Any) -> "DateTimeValue":
         if isinstance(value, DateTimeValue):
             return value
         if isinstance(value, Value):
             value = value.value
         return DateTimeValue(value=value)
 
-    def __boolOperation(self, other: any, operation: callable) -> bool:
+    def __boolOperation(self, other: Any, operation: Callable) -> bool:
         return operation(self.value, self.__cast(other).value)
 
-    def __mathOperation(self, other: any, operation: callable) -> "DateTimeValue":
+    def __mathOperation(self, other: Any, operation: Callable) -> "DateTimeValue":
         if isinstance(other, timedelta):
             return DateTimeValue(value=operation(self.value, other))
         return DateTimeValue(value=operation(self.value, self.__cast(other).value))
 
-    def __eq__(self, other: any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x == y)
 
-    def __ne__(self, other: any) -> bool:
+    def __ne__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x != y)
 
-    def __lt__(self, other: any) -> bool:
+    def __lt__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x < y)
 
-    def __le__(self, other: any) -> bool:
+    def __le__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x <= y)
 
-    def __gt__(self, other: any) -> bool:
+    def __gt__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x > y)
 
-    def __ge__(self, other: any) -> bool:
+    def __ge__(self, other: Any) -> bool:
         return self.__boolOperation(other, lambda x, y: x >= y)
 
-    def __add__(self, other: any) -> "DateTimeValue":
+    def __add__(self, other: Any) -> "DateTimeValue":
         return self.__mathOperation(other, lambda x, y: x + y)
 
-    def __sub__(self, other: any) -> "DateTimeValue":
+    def __sub__(self, other: Any) -> "DateTimeValue":
         return self.__mathOperation(other, lambda x, y: x - y)
 
     def __str__(self) -> str:
