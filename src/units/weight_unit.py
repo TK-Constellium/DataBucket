@@ -5,12 +5,12 @@ class WeightUnit(Unit):
 
     @classmethod
     def initialize_class(cls):
-        cls.MILLIGRAM = WeightUnit("Milligram", "mg")
-        cls.GRAM = WeightUnit("Gram", "g")
-        cls.KILOGRAM = WeightUnit("Kilogram", "kg")
-        cls.TON = WeightUnit("Ton", "t")
-        cls.POUND = WeightUnit("Pound", "lb")
-        cls.OUNCE = WeightUnit("Ounce", "oz")
+        cls.MILLIGRAM = cls("Milligram", "mg")
+        cls.GRAM = cls("Gram", "g")
+        cls.KILOGRAM = cls("Kilogram", "kg")
+        cls.TON = cls("Ton", "t")
+        cls.POUND = cls("Pound", "lb")
+        cls.OUNCE = cls("Ounce", "oz")
 
         cls.FACTOR_DICT = {
             cls.MILLIGRAM: 1e-6,
