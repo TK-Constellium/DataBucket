@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 class CombinedUnit:
+
     def __init__(
         self,
         numerator: list[Unit] = [],
