@@ -177,7 +177,7 @@ class Unit:
         return f"{self.name.upper()}"
 
     def __eq__(self, value: object) -> bool:
-        if not isinstance(value, Unit):
+        if not isinstance(value, Unit): # Maybe a bug here i.e. Length will be equal to Weight, because they are both instances of Unit
             return False
         return self.name == value.name
 
