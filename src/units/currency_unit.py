@@ -63,3 +63,6 @@ class CurrencyUnit(Unit):
             return getCurrentUnitFactorFunction()(unit, cls.date())
         except NotImplementedError:
             return default_factor_dict[unit]
+
+
+CurrencyUnit.initialize_class()
