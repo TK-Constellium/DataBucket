@@ -18,22 +18,23 @@ class dbField:
     DataBucket: str | None
     related_name: str | None
 
-    def __init__(self, **kwargs: dict[str, Any]):
-        self.__is_changeable = self.__checkAndGetBool(
-            kwargs, "is_changeable", self.IS_CHANGEABLE
-        )
-        self.__is_required = self.__checkAndGetBool(
-            kwargs, "is_required", self.IS_REQUIRED
-        )
-        self.__is_unique = self.__checkAndGetBool(kwargs, "is_unique", self.IS_UNIQUE)
-        self.__default: Any = kwargs.get("default", self.DEFAULT)
+    def __init__(
+        self,
+        is_changeable: bool | None = None,
+        is_required: bool | None = None,
+        is_unique: bool | None = None,
+        default: Any | None = None,
+    ):
+        self.__is_changeable = self.__checkAndGetBool(is_changeable, self.IS_CHANGEABLE)
+        self.__is_required = self.__checkAndGetBool(is_required, self.IS_REQUIRED)
+        self.__is_unique = self.__checkAndGetBool(is_unique, self.IS_UNIQUE)
+        self.__default: Any = default
 
-    def __checkAndGetBool(
-        self, dict_data: dict[str, Any], name: str, default: bool
-    ) -> bool:
-        value = dict_data.get(name, default)
+    def __checkAndGetBool(self, value: bool | None, default: bool) -> bool:
+        if value is None:
+            return default
         if not isinstance(value, bool):
-            raise ValueError(f"{name} must be a boolean")
+            raise ValueError(f"{value.__name__} must be a boolean")
         return value
 
     @property
@@ -67,6 +68,12 @@ class dbField:
         raise NotImplementedError
         # TODO: Implement CASCADE
 
+    def SET_NULL(self):
+        if not isinstance(self, DataBucketConnection):
+            raise ValueError("SET_NULL is only valid for DataBucketConnection")
+        raise NotImplementedError
+        # TODO: Implement SET_NULL
+
 
 class String(dbField):
 
@@ -75,7 +82,14 @@ class String(dbField):
         "ManyToMany": models.ManyToManyField,
     }
 
-    def __init__(self, max_length: int = 256, **kwargs: dict):
+    def __init__(
+        self,
+        max_length: int = 256,
+        is_changeable: bool | None = None,
+        is_required: bool | None = None,
+        is_unique: bool | None = None,
+        default: Any | None = None,
+    ):
         self.__max_length = max_length
 
         if max_length < 1:
@@ -84,7 +98,12 @@ class String(dbField):
             self.field_representation = models.TextField
         else:
             self.field_representation = models.CharField
-        super().__init__(**kwargs)
+        super().__init__(
+            is_required=is_required,
+            default=default,
+            is_unique=is_unique,
+            is_changeable=is_changeable,
+        )
 
         attributes = {
             "max_length": self.max_length,
@@ -169,11 +188,20 @@ class Number(dbField):
     MAX_DIGITS = 24
     DB_DECIAML_PLACES = 9
 
-    def __init__(self, decimal_places: int, unit: Unit | None, **kwargs: dict):
+    def __init__(
+        self,
+        decimal_places: int,
+        unit: Unit | DataBucketConnection | None,
+        is_changeable: bool | None = None,
+        is_required: bool | None = None,
+        default: Any = None,
+    ):
         self.__decimal_places = decimal_places
-        self.__unit = unit
+        self.__unit = self.__getDefinedUnit(unit)
 
-        super().__init__(**kwargs)
+        super().__init__(
+            is_changeable=is_changeable, is_required=is_required, default=default
+        )
 
         if decimal_places < 0:
             raise ValueError("decimal_places must be greater than or equal to 0")
@@ -202,3 +230,6 @@ class Number(dbField):
     @property
     def field(self) -> models.Field:
         return self.__field
+
+    def __getDefinedUnit(self, unit: Unit | DataBucketConnection | None) -> Unit | None:
+        pass

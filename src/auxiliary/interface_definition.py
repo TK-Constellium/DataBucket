@@ -95,7 +95,7 @@ class DataBucketConnection:
         data_bucket: type[DataBucket] | str,
         connection_type: Literal["ForeignKey", "ManyToMany", "OneToOne"],
         is_required: bool,
-        on_delete: Any,
+        on_delete: Any = None,
     ):
         self.__data_bucket = self.__getDataBucket(data_bucket)
         self.__connection_type = self.__getConnectionType(connection_type)
@@ -138,3 +138,6 @@ class DataBucketConnection:
     @property
     def on_delete(self) -> Any:
         return self.__on_delete
+
+    def __str__(self) -> str:
+        return f"{self.__data_bucket.__name__}({self.__connection_type.__name__})"
